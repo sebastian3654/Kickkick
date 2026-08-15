@@ -140,12 +140,53 @@
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.75);display:flex;align-items:center;justify-content:center;z-index:50;padding:16px;}
   .modal-card{background:var(--card-2);border:1px solid var(--border);border-radius:14px;padding:18px;width:100%;max-width:420px;max-height:80vh;overflow-y:auto;}
   .modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
-  .folder-item{display:flex;align-items:center;justify-content:space-between;padding:12px 10px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;cursor:pointer;}
-  .folder-item:hover{border-color:#3a3a3f;}
+  .folder-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:4px;}
+  .folder-card{
+    position:relative;aspect-ratio:1;border-radius:12px;overflow:hidden;cursor:pointer;
+    background:var(--pill);border:1px solid var(--border);
+  }
+  .folder-card:hover{border-color:#3a3a3f;}
+  .folder-card .cover-img{width:100%;height:100%;object-fit:cover;display:block;opacity:0.55;}
+  .folder-card .folder-icon{
+    position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-size:30px;color:var(--muted);
+  }
+  .folder-card .folder-info{
+    position:absolute;left:0;right:0;bottom:0;padding:8px 10px;
+    background:linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0));
+  }
+  .folder-card .folder-name{font-size:13px;font-weight:700;color:#FFFFFF;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .folder-card .folder-count{font-size:11px;color:var(--muted);}
+  .folder-card .folder-del{
+    position:absolute;top:6px;right:6px;background:rgba(0,0,0,0.6);color:#fff;border:none;
+    border-radius:50%;width:22px;height:22px;font-size:13px;cursor:pointer;line-height:1;z-index:2;
+  }
+
   .image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px;}
-  .image-thumb{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--pill);}
+  .image-thumb{position:relative;aspect-ratio:1;border-radius:8px;overflow:hidden;background:var(--pill);cursor:pointer;}
   .image-thumb img{width:100%;height:100%;object-fit:cover;display:block;}
-  .image-thumb .del-btn{position:absolute;top:2px;right:2px;background:rgba(0,0,0,0.6);color:#fff;border:none;border-radius:50%;width:20px;height:20px;font-size:12px;cursor:pointer;line-height:1;}
+
+  .lightbox{
+    position:fixed;inset:0;background:#000;z-index:100;display:flex;flex-direction:column;
+    touch-action:pan-y;
+  }
+  .lightbox-top{
+    display:flex;align-items:center;justify-content:space-between;padding:14px 16px;
+    padding-top:calc(14px + env(safe-area-inset-top));
+  }
+  .lightbox-counter{color:var(--muted);font-size:13px;font-weight:600;}
+  .lightbox-btn{background:transparent;border:none;color:#fff;font-size:22px;cursor:pointer;line-height:1;padding:4px 8px;}
+  .lightbox-stage{
+    flex:1;display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;
+  }
+  .lightbox-track{
+    display:flex;height:100%;width:100%;transition:transform 0.25s ease-out;will-change:transform;
+  }
+  .lightbox-slide{flex:0 0 100%;display:flex;align-items:center;justify-content:center;height:100%;}
+  .lightbox-slide img{max-width:100%;max-height:100%;object-fit:contain;}
+  .lightbox-dots{display:flex;justify-content:center;gap:6px;padding:14px;padding-bottom:calc(14px + env(safe-area-inset-bottom));}
+  .lightbox-dot{width:6px;height:6px;border-radius:50%;background:var(--border);}
+  .lightbox-dot-active{background:var(--accent);}
 </style>
 <body>
 
@@ -237,6 +278,20 @@
       <div id="image-grid" class="image-grid"></div>
     </div>
   </div>
+</div>
+
+<div id="lightbox" class="lightbox hidden">
+  <div class="lightbox-top">
+    <span id="lightbox-counter" class="lightbox-counter"></span>
+    <div>
+      <button id="lightbox-delete" class="lightbox-btn" title="Löschen">🗑</button>
+      <button id="lightbox-close" class="lightbox-btn" title="Schließen">×</button>
+    </div>
+  </div>
+  <div class="lightbox-stage">
+    <div id="lightbox-track" class="lightbox-track"></div>
+  </div>
+  <div id="lightbox-dots" class="lightbox-dots"></div>
 </div>
 
 <script type="module">
@@ -580,17 +635,33 @@
 
   function renderFolderList() {
     const list = el("folder-list");
+    list.className = "folder-grid";
     list.innerHTML = "";
     if (folders.length === 0) {
-      list.innerHTML = `<div class="muted-2">Noch keine Ordner angelegt.</div>`;
+      list.innerHTML = `<div class="muted-2" style="grid-column:1/-1;">Noch keine Ordner angelegt.</div>`;
       return;
     }
     folders.forEach((f) => {
-      const item = document.createElement("div");
-      item.className = "folder-item";
-      item.innerHTML = `<span>${escapeHtml(f.name)}</span><span class="muted-2">${f.images.length} Bild${f.images.length === 1 ? "" : "er"}</span>`;
-      item.addEventListener("click", () => openFolder(f.id));
-      list.appendChild(item);
+      const card = document.createElement("div");
+      card.className = "folder-card";
+      const cover = f.images[0];
+      card.innerHTML = `
+        ${cover ? `<img class="cover-img" src="${cover.dataUrl}" alt="" />` : `<div class="folder-icon">📁</div>`}
+        <button class="folder-del" title="Ordner löschen">×</button>
+        <div class="folder-info">
+          <div class="folder-name">${escapeHtml(f.name)}</div>
+          <div class="folder-count">${f.images.length} Bild${f.images.length === 1 ? "" : "er"}</div>
+        </div>
+      `;
+      card.addEventListener("click", () => openFolder(f.id));
+      card.querySelector(".folder-del").addEventListener("click", (e) => {
+        e.stopPropagation();
+        if (!confirm(`Ordner "${f.name}" wirklich löschen?`)) return;
+        folders = folders.filter((x) => x.id !== f.id);
+        saveFolders();
+        renderFolderList();
+      });
+      list.appendChild(card);
     });
   }
 
@@ -628,20 +699,127 @@
     const grid = el("image-grid");
     grid.innerHTML = "";
     if (!folder) return;
-    folder.images.forEach((img) => {
+    if (folder.images.length === 0) {
+      grid.innerHTML = `<div class="muted-2" style="grid-column:1/-1;">Noch keine Bilder in diesem Ordner.</div>`;
+      return;
+    }
+    folder.images.forEach((img, idx) => {
       const thumb = document.createElement("div");
       thumb.className = "image-thumb";
-      thumb.innerHTML = `<img src="${img.dataUrl}" alt="" /><button class="del-btn" data-id="${img.id}">×</button>`;
-      thumb.querySelector(".del-btn").addEventListener("click", (e) => {
-        e.stopPropagation();
-        folder.images = folder.images.filter((i) => i.id !== img.id);
-        saveFolders();
-        renderImageGrid();
-        renderFolderList();
-      });
+      thumb.innerHTML = `<img src="${img.dataUrl}" alt="" />`;
+      thumb.addEventListener("click", () => openLightbox(folder, idx));
       grid.appendChild(thumb);
     });
   }
+
+  // --- Vollbild-Bildbetrachter mit Wisch-Navigation ---
+  let lightboxFolderId = null;
+  let lightboxImages = [];
+  let lightboxIndex = 0;
+
+  function openLightbox(folder, index) {
+    lightboxFolderId = folder.id;
+    lightboxImages = folder.images;
+    lightboxIndex = index;
+    buildLightboxTrack();
+    updateLightboxPosition(false);
+    el("lightbox").classList.remove("hidden");
+  }
+
+  function buildLightboxTrack() {
+    const track = el("lightbox-track");
+    track.innerHTML = "";
+    lightboxImages.forEach((img) => {
+      const slide = document.createElement("div");
+      slide.className = "lightbox-slide";
+      slide.innerHTML = `<img src="${img.dataUrl}" alt="" />`;
+      track.appendChild(slide);
+    });
+    const dots = el("lightbox-dots");
+    dots.innerHTML = "";
+    lightboxImages.forEach((_, i) => {
+      const dot = document.createElement("div");
+      dot.className = "lightbox-dot" + (i === lightboxIndex ? " lightbox-dot-active" : "");
+      dots.appendChild(dot);
+    });
+  }
+
+  function updateLightboxPosition(animate) {
+    const track = el("lightbox-track");
+    track.style.transition = animate ? "transform 0.25s ease-out" : "none";
+    track.style.transform = `translateX(-${lightboxIndex * 100}%)`;
+    el("lightbox-counter").textContent = lightboxImages.length ? `${lightboxIndex + 1} / ${lightboxImages.length}` : "";
+    [...el("lightbox-dots").children].forEach((d, i) => {
+      d.classList.toggle("lightbox-dot-active", i === lightboxIndex);
+    });
+  }
+
+  function closeLightbox() {
+    el("lightbox").classList.add("hidden");
+    if (currentFolderId != null) renderImageGrid();
+    renderFolderList();
+  }
+
+  function lightboxDeleteCurrent() {
+    const folder = folders.find((f) => f.id === lightboxFolderId);
+    if (!folder || lightboxImages.length === 0) return;
+    const img = lightboxImages[lightboxIndex];
+    folder.images = folder.images.filter((i) => i.id !== img.id);
+    lightboxImages = folder.images;
+    saveFolders();
+    if (lightboxImages.length === 0) {
+      closeLightbox();
+      return;
+    }
+    if (lightboxIndex >= lightboxImages.length) lightboxIndex = lightboxImages.length - 1;
+    buildLightboxTrack();
+    updateLightboxPosition(false);
+  }
+
+  let touchStartX = 0;
+  let touchDeltaX = 0;
+  let touching = false;
+
+  el("lightbox").addEventListener("touchstart", (e) => {
+    if (e.touches.length !== 1) return;
+    touching = true;
+    touchStartX = e.touches[0].clientX;
+    touchDeltaX = 0;
+  }, { passive: true });
+
+  el("lightbox").addEventListener("touchmove", (e) => {
+    if (!touching) return;
+    touchDeltaX = e.touches[0].clientX - touchStartX;
+    const percent = -lightboxIndex * 100 + (touchDeltaX / window.innerWidth) * 100;
+    const track = el("lightbox-track");
+    track.style.transition = "none";
+    track.style.transform = `translateX(${percent}%)`;
+  }, { passive: true });
+
+  el("lightbox").addEventListener("touchend", () => {
+    if (!touching) return;
+    touching = false;
+    const threshold = window.innerWidth * 0.18;
+    if (touchDeltaX < -threshold && lightboxIndex < lightboxImages.length - 1) {
+      lightboxIndex++;
+    } else if (touchDeltaX > threshold && lightboxIndex > 0) {
+      lightboxIndex--;
+    }
+    updateLightboxPosition(true);
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (el("lightbox").classList.contains("hidden")) return;
+    if (e.key === "ArrowRight" && lightboxIndex < lightboxImages.length - 1) {
+      lightboxIndex++;
+      updateLightboxPosition(true);
+    } else if (e.key === "ArrowLeft" && lightboxIndex > 0) {
+      lightboxIndex--;
+      updateLightboxPosition(true);
+    } else if (e.key === "Escape") {
+      closeLightbox();
+    }
+  });
 
   function handleImageFiles(e) {
     const files = Array.from(e.target.files || []);
@@ -670,6 +848,8 @@
   el("folder-back-btn").addEventListener("click", backToFolderList);
   el("add-image-btn").addEventListener("click", () => el("image-file-input").click());
   el("image-file-input").addEventListener("change", handleImageFiles);
+  el("lightbox-close").addEventListener("click", closeLightbox);
+  el("lightbox-delete").addEventListener("click", lightboxDeleteCurrent);
 
   el("login-btn").addEventListener("click", () => loginWithName(el("login-name").value));
   el("login-name").addEventListener("keydown", (e) => { if (e.key === "Enter") loginWithName(el("login-name").value); });
