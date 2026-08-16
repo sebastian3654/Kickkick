@@ -312,6 +312,7 @@
   const db = getDatabase(app);
 
   const LOCAL_NAME_KEY = "kassenbuchtest_name";
+  const LOCAL_STATE_PREFIX = "kassenbuchtest_state_";
   const fmt = (n) => new Intl.NumberFormat("de-DE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(Number.isFinite(n) ? n : 0);
   const fmtPlain = (n) => new Intl.NumberFormat("de-DE", { maximumFractionDigits: 0 }).format(Number.isFinite(n) ? n : 0);
   const posLabel = { TW: "TW", AB: "ABW", MF: "MF", ST: "ANG" };
@@ -391,7 +392,27 @@
     });
   }
 
+  function saveLocalCache() {
+    if (!nameKey) return;
+    try {
+      localStorage.setItem(LOCAL_STATE_PREFIX + nameKey, JSON.stringify({ live: liveData, sandbox: sandboxData }));
+    } catch (e) {
+      // Lokaler Speicher voll oder nicht verfügbar - Firebase-Sync läuft trotzdem weiter
+    }
+  }
+
+  function loadLocalCache() {
+    if (!nameKey) return null;
+    try {
+      const raw = localStorage.getItem(LOCAL_STATE_PREFIX + nameKey);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   function scheduleSave() {
+    saveLocalCache();
     setStatus("Speichere …", false);
     clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
@@ -400,7 +421,7 @@
         await set(ref(db, `kassenbuchtest/${nameKey}`), { live: liveData, sandbox: sandboxData });
         setStatus("✓ Gespeichert", false);
       } catch (e) {
-        setStatus("⚠ Nicht gespeichert — " + (e && e.message ? e.message : "Fehler"), true);
+        setStatus("⚠ Nur lokal gespeichert (kein Internet?) — " + (e && e.message ? e.message : "Fehler"), true);
       }
     }, 400);
   }
@@ -559,9 +580,23 @@
     localStorage.setItem(LOCAL_NAME_KEY, name.trim());
     showApp();
     mode = "live";
-    state = liveData;
     updateModeUI();
-    setStatus("Lade …", false);
+
+    // Sofort den lokalen Stand zeigen, egal ob online oder nicht.
+    const cached = loadLocalCache();
+    if (cached) {
+      const migratedCache = migrateFull(cached);
+      liveData = migratedCache.live;
+      sandboxData = migratedCache.sandbox;
+    } else {
+      liveData = { cash: 0, players: [] };
+      sandboxData = { cash: 0, players: [] };
+    }
+    state = liveData;
+    render();
+    setStatus(cached ? "✓ Lokal geladen" : "Lade …", false);
+
+    // Danach im Hintergrund mit Firebase abgleichen, falls online.
     try {
       const snap = await get(ref(db, `kassenbuchtest/${nameKey}`));
       const migrated = migrateFull(snap.exists() ? snap.val() : null);
@@ -571,10 +606,10 @@
       state = liveData;
       updateModeUI();
       render();
+      saveLocalCache();
       setStatus("✓ Gespeichert", false);
     } catch (e) {
-      setStatus("⚠ Laden fehlgeschlagen — " + (e && e.message ? e.message : "Fehler"), true);
-      render();
+      setStatus(cached ? "⚠ Offline — zeige zuletzt gespeicherten Stand" : "⚠ Laden fehlgeschlagen — " + (e && e.message ? e.message : "Fehler"), true);
     }
 
     onValue(ref(db, `kassenbuchtest/${nameKey}`), (snap) => {
@@ -585,6 +620,7 @@
       sandboxData = migrated.sandbox;
       state = mode === "live" ? liveData : sandboxData;
       render();
+      saveLocalCache();
     });
   }
 
@@ -871,6 +907,14 @@
     loginWithName(savedName);
   } else {
     showLogin();
+  }
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("./sw.js").catch(() => {
+        // Offline-Caching nicht verfügbar - App läuft trotzdem, nur ohne echtes Offline-Laden
+      });
+    });
   }
 </script>
 
