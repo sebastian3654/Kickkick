@@ -857,24 +857,59 @@
     }
   });
 
-  function handleImageFiles(e) {
+  function resizeImage(file, maxDim, quality) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const img = new Image();
+        img.onload = () => {
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round(height * (maxDim / width));
+              width = maxDim;
+            } else {
+              width = Math.round(width * (maxDim / height));
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.onerror = () => reject(new Error("Bild konnte nicht gelesen werden"));
+        img.src = reader.result;
+      };
+      reader.onerror = () => reject(new Error("Datei konnte nicht gelesen werden"));
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function handleImageFiles(e) {
     const files = Array.from(e.target.files || []);
     const folder = folders.find((f) => f.id === currentFolderId);
     if (!folder || files.length === 0) return;
-    let remaining = files.length;
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        folder.images.push({ id: Date.now() + Math.random(), dataUrl: reader.result });
-        remaining--;
-        if (remaining === 0) {
-          saveFolders();
-          renderImageGrid();
-          renderFolderList();
-        }
-      };
-      reader.readAsDataURL(file);
-    });
+    const addBtn = el("add-image-btn");
+    const original = addBtn.textContent;
+    addBtn.disabled = true;
+    addBtn.textContent = "Verkleinere …";
+    for (const file of files) {
+      try {
+        // Verkleinert auf max. 1280px Kante, JPEG-Qualität 75% - reduziert
+        // Handy-Fotos meist von mehreren MB auf ein paar hundert KB.
+        const dataUrl = await resizeImage(file, 1280, 0.75);
+        folder.images.push({ id: Date.now() + Math.random(), dataUrl });
+      } catch (err) {
+        // einzelnes Bild übersprungen, Rest weiter versuchen
+      }
+    }
+    saveFolders();
+    renderImageGrid();
+    renderFolderList();
+    addBtn.disabled = false;
+    addBtn.textContent = original;
     e.target.value = "";
   }
 
